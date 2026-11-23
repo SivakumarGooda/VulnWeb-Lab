@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Academy · VulnWeb-Lab</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body class="lab">
+  <header class="topbar labbar">
+    <a class="brand" href="/lab"><span class="logo">V</span> VulnWeb-Lab Academy</a>
+    <nav>
+      <a href="/lab">Lessons</a>
+      <a href="/lab/scoreboard">Scoreboard</a>
+      <a href="/">Live range</a>
+    </nav>
+    <div class="account"><a href="/lab/api/catalog">catalog.json</a></div>
+  </header>
+
+  <main class="wrap">
+    <section class="hero labhero">
+      <div>
+        <p class="kicker">Guided curriculum</p>
+        <h1>Learn by breaking things</h1>
+        <p class="muted">{{ total }} vulnerabilities across {{ grouped|length }} categories.
+          Every lesson has a concept, walkthrough, hints, and a verification flag.</p>
+      </div>
+      <div class="progress-card">
+        <b>{{ solved }}</b><span>of {{ total }} solved</span>
+        <div class="bar"><i style="width: {{ (solved / total * 100)|round(1) }}%"></i></div>
+        <a class="btn" href="/lab/scoreboard">View scoreboard</a>
+      </div>
+    </section>
+
+    {% for category, vulns in grouped.items() %}
+    <section class="category">
+      <h2>{{ category }} <span class="count">{{ vulns|length }}</span></h2>
+      <div class="lesson-grid">
+        {% for v in vulns %}
+        <a class="lesson {{ 'done' if v.id in solved_ids else '' }}" href="/lab/{{ v.id }}">
+          <span class="lesson-id">{{ v.id }}</span>
+          <span class="lesson-title">{{ v.title }}</span>
+          <span class="lesson-meta">
+            <span class="pill diff-{{ v.difficulty }}">{{ v.difficulty }}</span>
+            <span class="pill">{{ v.cwe }}</span>
+            {% if v.id in solved_ids %}<span class="pill ok">solved</span>{% endif %}
+          </span>
+        </a>
+        {% endfor %}
+      </div>
+    </section>
+    {% endfor %}
+  </main>
+  <footer class="footer">
+    <span>VulnWeb-Lab Academy · local training only</span>
+    <span><a href="/">OrbitDesk live range</a></span>
+  </footer>
+</body>
+</html>

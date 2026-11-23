@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{{ title }} · OrbitDesk</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+  <header class="topbar">
+    <a class="brand" href="/dashboard"><span class="logo">O</span> OrbitDesk</a>
+    <nav>
+      {% for href, label in nav %}<a href="{{ href }}">{{ label }}</a>
+      {% endfor %}
+    </nav>
+    <form class="topsearch" method="get" action="/search"><input name="q" placeholder="Search OrbitDesk"></form>
+    <div class="account"><a href="/account">alice@orbitdesk.local</a></div>
+  </header>
+  <main class="wrap">
+    {{ content }}
+  </main>
+  <footer class="footer">
+    <span>OrbitDesk · support workspace.</span>
+    {% if not exam %}
+    <span>Deliberately vulnerable training range · local use only · <a href="/lab">Open the Academy</a></span>
+    {% else %}
+    <span>Support workspace · local use only</span>
+    {% endif %}
+  </footer>
+  <script src="/js/app.js" defer></script>
+</body>
+</html>

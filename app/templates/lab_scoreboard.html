@@ -1,0 +1,25 @@
+{% extends "lab_base.html" %}
+{% block title %}Scoreboard{% endblock %}
+{% block body %}
+<section class="lesson-head">
+  <a class="back" href="/lab">← All lessons</a>
+  <h1>Scoreboard</h1>
+  <p class="muted">{{ solved }} of {{ total }} flags captured.</p>
+</section>
+{% if rows %}
+<table class="data wide">
+  <tr><th>ID</th><th>Vulnerability</th><th>Category</th><th>Difficulty</th><th></th></tr>
+  {% for v in rows %}
+  <tr>
+    <td><code>{{ v.id }}</code></td>
+    <td><a href="/lab/{{ v.id }}">{{ v.title }}</a></td>
+    <td>{{ v.category }}</td>
+    <td><span class="pill diff-{{ v.difficulty }}">{{ v.difficulty }}</span></td>
+    <td><span class="pill ok">solved</span></td>
+  </tr>
+  {% endfor %}
+</table>
+{% else %}
+<p class="muted">No flags captured yet. Pick a lesson and break something.</p>
+{% endif %}
+{% endblock %}

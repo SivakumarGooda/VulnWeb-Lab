@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}Academy{% endblock %} · VulnWeb-Lab</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body class="lab">
+  <header class="topbar labbar">
+    <a class="brand" href="/lab"><span class="logo">V</span> VulnWeb-Lab Academy</a>
+    <nav>
+      <a href="/lab">Lessons</a>
+      <a href="/lab/scoreboard">Scoreboard</a>
+      <a href="/">Live range</a>
+    </nav>
+    <div class="account"><a href="/lab/api/catalog">catalog.json</a></div>
+  </header>
+  <main class="wrap">
+    {% block body %}{% endblock %}
+  </main>
+  <footer class="footer">
+    <span>VulnWeb-Lab Academy · local training only</span>
+    <span><a href="/">OrbitDesk live range</a></span>
+  </footer>
+</body>
+</html>

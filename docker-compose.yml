@@ -1,0 +1,12 @@
+services:
+  vulnweb-lab:
+    build: .
+    ports:
+      # Loopback only. Do not publish this on 0.0.0.0.
+      - "127.0.0.1:8080:8080"
+    environment:
+      RANGE_SECRET: "vulnweb-lab-local-training-secret"
+      RANGE_SAFE: "0"
+      # For an exam run, set this and remove RANGE_SECRET:
+      # RANGE_EXAM: "1"
+    restart: unless-stopped

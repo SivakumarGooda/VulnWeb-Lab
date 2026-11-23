@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>VulnWeb-Lab · OrbitDesk</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body class="landing">
+  <main class="landing-wrap">
+    <p class="kicker">Intentionally vulnerable · local training range</p>
+    <h1>VulnWeb-Lab</h1>
+    <p class="lede">One codebase, two ways to learn. Explore a realistic support SaaS
+      with hidden vulnerabilities, or follow the guided Academy where every finding
+      comes with the concept, steps, hints, and remediation.</p>
+
+    <div class="split">
+      <a class="mode" href="/dashboard">
+        <span class="mode-tag">Live range</span>
+        <h2>OrbitDesk</h2>
+        <p>A normal-looking customer-support product. No hints, no labels. Find the
+          issues yourself, or point an AI agent at it.</p>
+        <span class="mode-cta">Enter the site →</span>
+      </a>
+      <a class="mode" href="/lab">
+        <span class="mode-tag">Guided</span>
+        <h2>Academy</h2>
+        <p>Every vulnerability as a lesson: concept, objective, step-by-step
+          walkthrough, hints, example requests, and a flag to confirm success.</p>
+        <span class="mode-cta">Open the Academy →</span>
+      </a>
+    </div>
+
+    <section class="stats">
+      <div><b>{{ total }}</b><span>flagged vulnerabilities</span></div>
+      <div><b>{{ families|length }}</b><span>vulnerability families</span></div>
+      <div><b>200+</b><span>agent-verifiable checks</span></div>
+      <div><b>{{ 'on' if safe_mode else 'off' }}</b><span>safe mode</span></div>
+    </section>
+
+    <section class="families">
+      {% for name, count in families.items() %}
+        <span class="chip">{{ name }} <b>{{ count }}</b></span>
+      {% endfor %}
+    </section>
+
+    <p class="danger">⚠ This application is deliberately insecure. Run it in the provided
+      container or an isolated VM. Never expose it to the internet or a shared network.</p>
+  </main>
+</body>
+</html>

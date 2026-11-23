@@ -1,0 +1,91 @@
+{% extends "lab_base.html" %}
+{% block title %}{{ v.title }} · Academy{% endblock %}
+{% block body %}
+<div class="lesson-head">
+  <a class="back" href="/lab">← All lessons</a>
+  <div class="lesson-tags">
+    <span class="pill">{{ v.id }}</span>
+    <span class="pill">{{ v.category }}</span>
+    <span class="pill">{{ v.cwe }}</span>
+    <span class="pill">{{ v.owasp }}</span>
+    <span class="pill diff-{{ v.difficulty }}">{{ v.difficulty }}</span>
+    {% if solved %}<span class="pill ok">solved</span>{% endif %}
+  </div>
+  <h1>{{ v.title }}</h1>
+  <p class="muted">{{ v.summary }}</p>
+  {% if message %}<p class="notice">{{ message }}</p>{% endif %}
+</div>
+
+<div class="lesson-layout">
+  <article class="lesson-main">
+    <section class="block">
+      <h2>Concept</h2>
+      <p>{{ v.concept }}</p>
+    </section>
+
+    <section class="block">
+      <h2>Objective</h2>
+      <p>{{ v.objective }}</p>
+    </section>
+
+    <section class="block">
+      <h2>Step by step</h2>
+      <ol class="steps">
+        {% for step in v.steps %}<li>{{ step }}</li>{% endfor %}
+      </ol>
+    </section>
+
+    <section class="block">
+      <h2>Hints</h2>
+      {% for hint in v.hints %}
+      <details class="hint"><summary>Hint {{ loop.index }}</summary><p>{{ hint }}</p></details>
+      {% endfor %}
+    </section>
+
+    <section class="block">
+      <h2>Try it</h2>
+      <p>Target endpoint: <a class="route" href="{{ v.route }}" target="_blank">{{ v.method }} {{ v.route }}</a></p>
+      <p class="muted">Vulnerable parameter: <code>{{ v.param or 'see route' }}</code></p>
+      <div class="code">
+        {% for line in curl %}
+          <pre>{{ line }}</pre>
+        {% endfor %}
+      </div>
+      <p class="tiny">The example request is a working solution for this instance.
+        Try to understand why it works before using it.</p>
+    </section>
+
+    <section class="block">
+      <h2>Remediation</h2>
+      <p>{{ v.remediation }}</p>
+    </section>
+  </article>
+
+  <aside class="lesson-side">
+    <div class="flagbox">
+      <h2>Submit the flag</h2>
+      <p class="muted">The flag appears when the exploit succeeds. Paste it here to record the solve.</p>
+      <form method="post" action="/lab/verify">
+        <input type="hidden" name="vuln_id" value="{{ v.id }}">
+        <input name="flag" placeholder="FLAG{...}" autocomplete="off">
+        <button>Verify flag</button>
+      </form>
+    </div>
+    <div class="side-meta">
+      <h3>Metadata</h3>
+      <dl>
+        <dt>Family</dt><dd>{{ v.family }}</dd>
+        <dt>CWE</dt><dd>{{ v.cwe }}</dd>
+        <dt>OWASP</dt><dd>{{ v.owasp }}</dd>
+        <dt>Difficulty</dt><dd>{{ v.difficulty }}</dd>
+      </dl>
+      <h3>Agent checklist</h3>
+      <ul class="check">
+        <li>Confirm the input reaches the sink.</li>
+        <li>Produce the proof value, not just an error.</li>
+        <li>Submit the flag to <code>/api/verify</code>.</li>
+      </ul>
+    </div>
+  </aside>
+</div>
+{% endblock %}
