@@ -85,6 +85,41 @@ Modes:
 python run.py --exam            # equivalent to RANGE_EXAM=1
 ```
 
+### Reaching the range from another machine
+
+By default the range listens on `127.0.0.1`, so only the machine running it can
+reach it. To test it from another machine (for example, the range in a Kali VM
+and the scanner or agent on your host), choose the address it listens on with
+`--host` or `RANGE_HOST`:
+
+```bash
+# Listen on one network interface (recommended): its IP on the lab network
+python run.py --mode lab --host 192.168.56.10 --port 8081
+
+# Listen on every interface
+python run.py --mode lab --host 0.0.0.0 --port 8081
+
+# Same thing with environment variables
+RANGE_HOST=0.0.0.0 RANGE_PORT=8081 python run.py --mode lab
+```
+
+Then browse to `http://<that-machine's-IP>:8081` from the other machine
+(`ip -4 addr` on Linux, `ipconfig` on Windows shows the IP).
+
+> [!CAUTION]
+> Anything that can reach that port can attack the host: the command-injection
+> exercises run **real shell commands** as your user. Only do this on an
+> isolated network you control (a host-only or internal VM network, a lab
+> VLAN), never on home, office, cafe or cloud networks reachable by others.
+>
+> - Prefer one interface's IP over `0.0.0.0`, which also listens on Wi-Fi,
+>   Ethernet and any VPN.
+> - Firewall the port to the one machine that needs it, for example
+>   `sudo ufw allow from 192.168.56.1 to any port 8081`.
+> - Add `RANGE_SAFE=1` to disable command execution and local file reads if you
+>   do not need those exercises.
+> - Stop the range (Ctrl+C) when you are done.
+
 ### Docker
 
 ```bash
@@ -94,6 +129,12 @@ docker compose up --build
 The compose file publishes the port to `127.0.0.1` only and runs as a non-root
 user. Set `RANGE_SECRET` to keep flags stable across restarts. For an exam run,
 set `RANGE_EXAM: "1"` instead; exam mode ignores `RANGE_SECRET` and rotates flags.
+
+Inside the container the range already listens on `0.0.0.0`; what other
+machines can reach is decided by the `ports:` line in `docker-compose.yml`. To
+reach it from another machine, change `"127.0.0.1:8080:8080"` to your lab
+network IP (for example `"192.168.56.10:8080:8080"`) or `"8080:8080"` for every
+interface. The caution above applies.
 
 ---
 
@@ -146,7 +187,7 @@ RANGE_EXAM=1 python tools/exploit_all.py --base http://127.0.0.1:8080
 
 | Control | Behavior |
 |---|---|
-| `RANGE_HOST=127.0.0.1` | Default bind address; do not change on a shared machine. |
+| `RANGE_HOST=127.0.0.1` / `--host` | Default bind address. Use a lab-network IP or `0.0.0.0` only on an isolated network (see *Reaching the range from another machine*). |
 | `RANGE_SAFE=1` | Disables command injection, path traversal, and `file://` SSRF. |
 | Non-root container | Docker image creates and uses a `range` user. |
 | No external SSRF | The SSRF exercises resolve internal destinations only; they do not make arbitrary internet requests. |
