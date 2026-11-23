@@ -1,321 +1,312 @@
 # VulnWeb-Lab
 
-A deliberately vulnerable web application for learning and for training AI
-agents. One codebase, **two interfaces**:
+A deliberately vulnerable web app for **learning web security** and for
+**testing security scanners and AI pentest agents**.
 
-| Interface | URL | Purpose |
-|---|---|---|
-| **OrbitDesk** | `/` | A realistic customer-support SaaS with vulnerabilities hidden inside normal features. No hints, no labels. |
-| **Academy** | `/lab` | Every vulnerability as a guided lesson: concept, objective, step-by-step walkthrough, hints, a working example request, flag submission, and remediation. |
-
-**248 individually flagged vulnerabilities** across **21 families**, each with a
-recorded flag, a machine-readable manifest, and an automated exploit test.
+It looks and behaves like a real product: **OrbitDesk**, a customer-support
+SaaS. Hidden inside its normal features are **248 real vulnerabilities** across
+**21 types** (SQL injection, XSS, SSRF, IDOR, command injection and more). Each
+one hides a unique flag, so you can prove you found it.
 
 > [!WARNING]
-> This application is intentionally insecure. It runs real shell commands and
-> reads local files for some exercises. Run it **only** in the provided
-> container or an isolated VM, bind it to `127.0.0.1`, and never expose it to
-> the internet or a shared network. It is for authorized training only.
+> **This app is insecure on purpose.** Some exercises run real shell commands
+> and read real files. Run it only on your own machine, in a VM or in the
+> provided container. Never put it on the internet or a shared network.
 
 ---
 
-## Catalog
+## Two modes
 
-| Family | Count | What it covers |
-|---|---:|---|
-| `sqli` | 24 | Login bypass, UNION extraction, numeric injection, space/WAF bypasses |
-| `xss` | 24 | HTML, attribute, JavaScript, URL, textarea, title, JSON, markdown contexts |
-| `stored-xss` | 12 | Persistent comments, profiles, reviews, wiki, announcements |
-| `cmdi` | 16 | Shell metacharacter injection in ping/DNS/whois/convert/archive tools |
-| `traversal` | 16 | `../`, `....//` filter bypasses, attachment and backup readers |
-| `ssrf` | 14 | Loopback/metadata fetches, allowlist bypass, decimal IP bypass |
-| `idor` | 20 | Cross-tenant tickets, invoices, users, files, payments, audit entries |
-| `auth` | 16 | Default creds, predictable resets, unsigned/weak JWTs, OTP, 2FA, session fixation |
-| `redirect` | 12 | Open redirects and trusted-prefix allowlist bypasses |
-| `ssti` | 12 | Jinja template injection with alternate syntax when `{{ }}` is blocked |
-| `upload` | 10 | Active HTML/SVG, content-type spoofing, double extensions, zip-slip, overwrite |
-| `logic` | 16 | Negative quantity, price tampering, coupon stacking, race, self-approval |
-| `info` | 20 | Debug/backups, CORS with credentials, missing headers, CSRF, CRLF injection |
-| `nosql` | 6 | `$ne`, `$gt`, `$regex`, `$or`, `$in`, `$where` authentication bypasses |
-| `ldap` | 4 | Filter injection in directory search and LDAP auth |
-| `xxe` | 6 | XML external entities reading local files through SAX parsers |
-| `host-header` | 4 | Poisoned Host/X-Forwarded-Host in reset and invitation links |
-| `hpp` | 4 | Duplicate parameters that flip a privileged decision |
-| `cache` | 4 | Web cache poisoning via reflected X-Forwarded-Host |
-| `csv-injection` | 4 | Spreadsheet formula injection in CSV exports |
-| `email-injection` | 4 | CRLF header injection in contact and invite forms |
-| **Total** | **248** | |
-
-Every entry has a unique ID (for example `sqli-05`), route, parameter,
-difficulty, CWE, OWASP mapping, and a flag in the form
-`FLAG{orbit_<id>_<token>}`.
+| Mode | Start it with | Use it to | What you get |
+|---|---|---|---|
+| **Learning** (default) | `python run.py` | Learn and practise | OrbitDesk to hack, plus the **Academy** at `/lab`: every vulnerability as a lesson with the concept, steps, hints and the fix |
+| **Exam** | `python run.py --exam` | Test a scanner or AI agent | OrbitDesk only. No lessons, no answer list, and the flags change on every start |
 
 ---
 
 ## Quick start
 
-### Local
+You need Python 3.10 or newer.
+
+**Linux / macOS / Kali**
 
 ```bash
-python -m venv .venv
-# Windows
-.venv\Scripts\activate
-# Linux/macOS
+git clone https://github.com/SivakumarGooda/VulnWeb-Lab.git
+cd VulnWeb-Lab
+python3 -m venv .venv
 source .venv/bin/activate
-
 pip install -r requirements.txt
-python run.py                 # both interfaces on http://127.0.0.1:8080
+python run.py
 ```
 
-Two separate processes, if you prefer:
+**Windows (PowerShell)**
+
+```powershell
+git clone https://github.com/SivakumarGooda/VulnWeb-Lab.git
+cd VulnWeb-Lab
+python -m venv .venv
+.venv\Scripts\activate
+pip install -r requirements.txt
+python run.py
+```
+
+Then open **http://127.0.0.1:8080** in your browser. Stop it with `Ctrl+C`.
+
+### All start options
+
+| Option | What it does | Default |
+|---|---|---|
+| `--exam` | Exam mode (see below). Without it you get learning mode | off |
+| `--host <ip>` | Address to listen on | `127.0.0.1` |
+| `--port <n>` | Port to listen on | `8080` |
+
+Examples:
 
 ```bash
-python run.py --mode site --port 8080   # OrbitDesk only
-python run.py --mode lab  --port 8081   # Academy only (site endpoints remain targets)
+python run.py --port 8081           # learning mode on port 8081
+python run.py --exam                # exam mode
 ```
 
-Modes:
+Older commands still work: `--mode both` and `--mode lab` start learning mode,
+`--mode site` starts exam mode.
 
-- `site` — only the realistic OrbitDesk interface.
-- `lab` — the Academy; `/` redirects to `/lab`, all site endpoints stay reachable as targets.
-- `both` — OrbitDesk at `/`, Academy at `/lab` (default).
-- `--exam` — OrbitDesk only, with every answer endpoint hidden and flags kept in memory (see below).
+---
+
+## Open it from another machine
+
+By default only the machine running the app can reach it. To use it from
+another machine (for example the app runs in a Kali VM and your browser or
+agent is on your laptop), tell it which address to listen on:
 
 ```bash
-python run.py --exam            # equivalent to RANGE_EXAM=1
+# Recommended: listen on one network only, using that machine's IP on it
+python run.py --host 192.168.56.10 --port 8081
+
+# Or listen on every network the machine is connected to
+python run.py --host 0.0.0.0 --port 8081
 ```
 
-### Reaching the range from another machine
-
-By default the range listens on `127.0.0.1`, so only the machine running it can
-reach it. To test it from another machine (for example, the range in a Kali VM
-and the scanner or agent on your host), choose the address it listens on with
-`--host` or `RANGE_HOST`:
-
-```bash
-# Listen on one network interface (recommended): its IP on the lab network
-python run.py --mode lab --host 192.168.56.10 --port 8081
-
-# Listen on every interface
-python run.py --mode lab --host 0.0.0.0 --port 8081
-
-# Same thing with environment variables
-RANGE_HOST=0.0.0.0 RANGE_PORT=8081 python run.py --mode lab
-```
-
-Then browse to `http://<that-machine's-IP>:8081` from the other machine
-(`ip -4 addr` on Linux, `ipconfig` on Windows shows the IP).
+Find the machine's IP with `ip -4 addr` (Linux) or `ipconfig` (Windows), then
+open `http://<that-ip>:8081` from the other machine.
 
 > [!CAUTION]
-> Anything that can reach that port can attack the host: the command-injection
-> exercises run **real shell commands** as your user. Only do this on an
-> isolated network you control (a host-only or internal VM network, a lab
-> VLAN), never on home, office, cafe or cloud networks reachable by others.
+> Anyone who can reach that port can attack the machine running the app,
+> because some exercises run **real shell commands**. Only do this on a network
+> you control and nobody else uses, such as a VM host-only network. Never do it
+> on home, office, café or cloud networks.
 >
-> - Prefer one interface's IP over `0.0.0.0`, which also listens on Wi-Fi,
->   Ethernet and any VPN.
-> - Firewall the port to the one machine that needs it, for example
+> - Prefer a single IP over `0.0.0.0`, which also listens on Wi-Fi and VPNs.
+> - Allow only the machine that needs it, e.g.
 >   `sudo ufw allow from 192.168.56.1 to any port 8081`.
-> - Add `RANGE_SAFE=1` to disable command execution and local file reads if you
->   do not need those exercises.
-> - Stop the range (Ctrl+C) when you are done.
+> - Add `RANGE_SAFE=1` to turn off command execution and file reads if you don't
+>   need those exercises.
+> - Stop the app when you're done.
 
-### Docker
+---
+
+## Run with Docker
 
 ```bash
 docker compose up --build
 ```
 
-The compose file publishes the port to `127.0.0.1` only and runs as a non-root
-user. Set `RANGE_SECRET` to keep flags stable across restarts. For an exam run,
-set `RANGE_EXAM: "1"` instead; exam mode ignores `RANGE_SECRET` and rotates flags.
+Open **http://127.0.0.1:8080**. The container runs as a non-root user and is
+reachable from your own machine only.
 
-Inside the container the range already listens on `0.0.0.0`; what other
-machines can reach is decided by the `ports:` line in `docker-compose.yml`. To
-reach it from another machine, change `"127.0.0.1:8080:8080"` to your lab
-network IP (for example `"192.168.56.10:8080:8080"`) or `"8080:8080"` for every
-interface. The caution above applies.
+- **Exam mode:** in `docker-compose.yml`, remove `RANGE_SECRET` and set
+  `RANGE_EXAM: "1"`.
+- **Another machine:** change the `ports:` line from `"127.0.0.1:8080:8080"` to
+  your network IP (e.g. `"192.168.56.10:8080:8080"`). The caution above applies.
 
 ---
 
-## Exam mode (agent evaluation)
+## Exam mode: testing a scanner or AI agent
 
-Guided mode is for learning: the Academy shows the exact payload and the vault
-contains the flags. **Exam mode** is for measuring an agent that should not see
-the answers:
+Exam mode turns VulnWeb-Lab into a fair test. The tool you are testing has to
+find everything on its own, like on a real target.
 
 ```bash
 python run.py --exam
-# or
-RANGE_EXAM=1 python run.py
 ```
 
-What changes:
+**What is hidden in exam mode**
 
-| Guided mode | Exam mode |
+| Learning mode | Exam mode |
 |---|---|
-| `/lab` lessons with exact payloads | `/lab` returns **404** |
-| `/api/catalog` route manifest | `/api/catalog` returns **404** |
-| `/api/solves` progress feed | `/api/solves` returns **404** |
-| Stable flags, written to `instance/vault` | Flags live **in memory only**, rotate each start |
-| `instance/secret.key` + `range.db` on disk | No secret, database, or flag vault on disk |
-| One SQLite database holds every flag | Each SQLi challenge gets its **own** database with one flag |
-| Command injection can read the shared vault | Child sees only `RANGE_FLAG` for that challenge |
-| Traversal reads a shared flag file | Traversal returns only that challenge's virtual flag |
+| Academy lessons at `/lab` | Not available (404) |
+| List of all vulnerabilities at `/api/catalog` | Not available (404) |
+| Progress page at `/api/solves` | Not available (404) |
+| Flags stay the same, stored on disk | Flags live in memory only and change on every start |
 
-`POST /api/verify` remains available for scoring. Everything still holds 248
-individual flags; they are simply not co-located, so one RCE or SQL injection
-cannot harvest the other 221.
+**Why one bug can't reveal the others:** each flag can only be reached through
+its own vulnerability. A SQL injection reads its own database, a command
+injection sees only its own flag, and so on. Breaking one challenge never
+hands over the other 247.
 
-Residual risks and recommendations:
+**Not everything is linked, like a real site:**
 
-- Source files (`app/handlers.py`, `tools/exploit_all.py`) still contain the
-  answers. Run the range in a container and the agent in a **separate**
-  container with only the base URL — no repository or `instance/` mount.
-- A clean exam host should not contain the guided `instance/` folder. Exam mode
-  uses `instance-exam/`, but an RCE could still read a leftover `instance/vault`
-  if both exist on the same filesystem. Use a fresh container for exams.
-- Verify an exam deployment with:
+- Most features are reachable through the normal pages and forms.
+- Some API endpoints only appear in the site's JavaScript or in the developer
+  docs at `/api-docs`.
+- Some internal files and pages aren't linked anywhere, and have to be found by
+  guessing or with wordlists. `robots.txt` leaks a few of them.
+- You only ever see your own record IDs; finding other people's data means
+  changing IDs yourself.
+- `robots.txt` disallows `/admin/`. Tools that respect robots.txt will skip the
+  admin area unless told otherwise.
 
-```bash
-RANGE_EXAM=1 python tools/exploit_all.py --base http://127.0.0.1:8080
-```
+**How to run a fair test**
+
+1. Run the app in a fresh container or VM, and the tool on a different machine.
+2. Give the tool **only the base URL**, never this repository, `/api/catalog`,
+   the Academy or `tools/exploit_all.py` (they contain the answers).
+3. Delete any leftover `instance/` folder from earlier learning sessions first.
+4. Score by checking the flags the tool finds (see below).
 
 ---
 
-## Safety controls
+## Checking flags
 
-| Control | Behavior |
-|---|---|
-| `RANGE_HOST=127.0.0.1` / `--host` | Default bind address. Use a lab-network IP or `0.0.0.0` only on an isolated network (see *Reaching the range from another machine*). |
-| `RANGE_SAFE=1` | Disables command injection, path traversal, and `file://` SSRF. |
-| Non-root container | Docker image creates and uses a `range` user. |
-| No external SSRF | The SSRF exercises resolve internal destinations only; they do not make arbitrary internet requests. |
-| Disposable state | Everything lives in `instance/` (or `instance-exam/`); delete it to regenerate the database, flags, and vault. |
-
-Command injection is intentionally real. That is why the container and the
-localhost bind are the supported deployment.
-
----
-
-## Flags, verification, and progress
-
-Flags are derived from a secret:
-
-- Guided mode: `RANGE_SECRET` environment variable, or `instance/secret.key`
-  (random on first start).
-- Exam mode: a fresh random secret in memory on every start. Nothing is written
-  to disk and flags change between runs.
-
-The same secret must be shared by every guided process that must agree on flags.
+Every flag looks like `FLAG{orbit_<id>_<token>}`. Check one with:
 
 ```bash
-# Verify a flag
 curl -s -X POST http://127.0.0.1:8080/api/verify \
   -H 'Content-Type: application/json' \
   -d '{"flag":"FLAG{...}"}'
-
-# Catalog manifest (248 entries)
-curl -s http://127.0.0.1:8080/api/catalog
-
-# Progress
-curl -s http://127.0.0.1:8080/api/solves
 ```
 
-A successful verification records the solve and returns its vulnerability
-metadata.
+A correct flag returns which vulnerability it belongs to and records it as
+solved. You can also paste flags into the Academy.
 
----
-
-## Training agents
-
-The range is designed so an agent can work without reading this source:
-
-1. Give the agent the base URL (`http://127.0.0.1:8080`).
-2. Optionally give it `/api/catalog` — the discovery manifest with IDs, routes,
-   methods, parameters, categories, and objectives.
-3. The agent probes, exploits, captures a flag, and submits it to
-   `/api/verify`.
-4. Score with `/api/solves`.
-
-Included tools:
+Learning mode only:
 
 ```bash
-# End-to-end check: replays a working exploit for all 248 entries against a
-# running instance and verifies every flag. Add RANGE_EXAM=1 for exam mode.
-python tools/exploit_all.py --base http://127.0.0.1:8080
-
-# Minimal agent client: prints the catalog and verifies a flag with the stdlib.
-python tools/agent_client.py --catalog
-python tools/agent_client.py --verify 'FLAG{...}'
+curl -s http://127.0.0.1:8080/api/catalog   # all 248 vulnerabilities
+curl -s http://127.0.0.1:8080/api/solves    # what you've solved so far
 ```
 
-For exam runs, do **not** give the agent `/api/catalog`, the Academy, the
-repository, or `tools/exploit_all.py`. Give it only the base URL and have the
-harness submit flags to `/api/verify`.
+**About flag values:** in learning mode, flags come from a random secret
+stored in `instance/secret.key`, so they stay the same between restarts (set
+`RANGE_SECRET` to share one secret between machines). In exam mode they change
+every time.
 
 ---
 
-## Project layout
+## What's inside
+
+| Type | Count | Examples |
+|---|---:|---|
+| SQL injection (`sqli`) | 24 | Login bypass, UNION extraction, filters that strip spaces |
+| Reflected XSS (`xss`) | 24 | HTML, attribute, JavaScript, URL and JSON contexts |
+| Stored XSS (`stored-xss`) | 12 | Comments, profiles, reviews, wiki pages |
+| Command injection (`cmdi`) | 16 | Ping, DNS, whois and file-conversion tools |
+| Path traversal (`traversal`) | 16 | File downloads, previews, `....//` filter bypasses |
+| SSRF (`ssrf`) | 14 | Webhooks, URL previews, allowlist and IP-encoding bypasses |
+| IDOR (`idor`) | 20 | Other customers' tickets, invoices, files and payments |
+| Authentication (`auth`) | 16 | Default passwords, guessable reset tokens, weak JWTs, 2FA bypass |
+| Open redirect (`redirect`) | 12 | Login and logout redirects, prefix-check bypasses |
+| Template injection (`ssti`) | 12 | Email and report templates |
+| File upload (`upload`) | 10 | HTML/SVG uploads, fake content types, zip-slip |
+| Business logic (`logic`) | 16 | Negative quantities, price tampering, coupon stacking, races |
+| Misconfiguration (`info`) | 20 | Exposed `.env`/`.git`/backups, CORS, missing headers, CSRF, CRLF |
+| NoSQL injection (`nosql`) | 6 | `$ne`, `$regex`, `$or` login bypasses |
+| LDAP injection (`ldap`) | 4 | Directory search and directory sign-in |
+| XXE (`xxe`) | 6 | XML imports that read local files |
+| Host header (`host-header`) | 4 | Poisoned password-reset and invitation links |
+| Parameter pollution (`hpp`) | 4 | Repeated parameters that flip a decision |
+| Cache poisoning (`cache`) | 4 | Cached pages that reflect a forwarded host |
+| CSV injection (`csv-injection`) | 4 | Spreadsheet formulas in CSV exports |
+| Email header injection (`email-injection`) | 4 | Extra `Bcc:` headers in contact and invite forms |
+| **Total** | **248** | |
+
+---
+
+## Safety settings
+
+| Setting | What it does |
+|---|---|
+| `RANGE_HOST` / `--host` | Address to listen on. Default `127.0.0.1` (this machine only). |
+| `RANGE_PORT` / `--port` | Port. Default `8080`. |
+| `RANGE_SAFE=1` | Turns off command execution, file reads and `file://` fetches. |
+| `RANGE_EXAM=1` / `--exam` | Exam mode. |
+| `RANGE_SECRET` | Fixed secret for stable flags in learning mode. |
+
+Also built in:
+
+- The SSRF exercises only reach fake internal services. They never fetch
+  arbitrary internet addresses.
+- All data lives in `instance/` (or `instance-exam/`). Delete the folder to reset
+  everything: database, flags and solves.
+
+---
+
+## For developers
+
+### Run the tests
+
+```bash
+pytest -q                                   # learning mode: 296 passed, 11 skipped
+RANGE_EXAM=1 pytest -q tests/test_catalog.py tests/test_exploits.py \
+  tests/test_exam.py tests/test_product.py  # exam mode: 292 passed, 8 skipped
+```
+
+The tests prove every one of the 248 vulnerabilities can actually be exploited
+in both modes. They also check that exam mode keeps answers hidden, and that
+the site stays realistic: no hint words on product pages, and internal pages
+stay unlinked.
+
+To check a running instance end to end:
+
+```bash
+python tools/exploit_all.py --base http://127.0.0.1:8080              # learning mode
+RANGE_EXAM=1 python tools/exploit_all.py --base http://127.0.0.1:8080 # exam mode
+```
+
+### Project layout
 
 ```
 VulnWeb-Lab/
-  run.py                  launcher and mode selection
-  config.py               paths, secret, safe-mode switch
+  run.py                start-up options (learning or --exam)
+  config.py             paths, secret, safe mode, exam mode
   app/
-    catalog.py            248 vulnerability definitions + guided content
-    handlers.py           vulnerable behavior, example exploits, flag verification
-    site.py               realistic OrbitDesk routes and pages
-    lab.py                Academy index, lessons, verification, catalog API
-    store.py              SQLite seed data, solves, flags
-    flags.py              deterministic flags and the flag vault
-    templates/            OrbitDesk and Academy UI
-    static/style.css      shared styling
+    catalog.py          the 248 vulnerabilities and their lessons
+    handlers.py         the vulnerable behaviour and example exploits
+    product.py          OrbitDesk pages, navigation, robots.txt, sitemap
+    site.py             OrbitDesk routes
+    lab.py              the Academy and the catalog API
+    store.py            database, flags and solves
+    flags.py            flag generation
+    templates/          page templates and the app's JavaScript (app.js)
+    static/style.css    styling
   tests/
-    test_catalog.py       count, uniqueness, metadata integrity
-    test_exploits.py      proves every entry is exploitable
-    test_exam.py          exam-mode isolation guarantees
-    test_ui.py            landing, Academy, APIs
+    test_catalog.py     every entry is complete and unique
+    test_exploits.py    every entry is exploitable
+    test_exam.py        exam mode hides the answers
+    test_product.py     the site stays realistic
+    test_ui.py          Academy and API pages
   tools/
-    exploit_all.py        replay all documented exploits against a live server
-    agent_client.py       minimal stdlib client for agent training
+    exploit_all.py      replays every exploit against a running instance
+    agent_client.py     minimal client for agents: list the catalog, check flags
 ```
 
-### Adding a family
+### Adding a new vulnerability type
 
-1. Add metadata to `FAMILY_META` in `app/catalog.py`.
-2. Add instance rows and `_mk(...)` calls to `_build()`.
-3. Implement the handler in `app/handlers.py` and register it in `HANDLERS`.
-4. Add a branch to `example_sequence()`.
-5. Run `pytest` — the catalog and exploit tests enforce uniqueness and
-   exploitability.
-
----
-
-## Tests
-
-```bash
-# Guided mode
-pytest -q
-# 262 passed, 10 skipped (exam-only tests)
-
-# Exam mode
-RANGE_EXAM=1 pytest -q tests/test_catalog.py tests/test_exploits.py tests/test_exam.py
-# 265 passed
-```
-
-The suite proves every one of the 248 entries is exploitable in both modes and
-checks the exam-mode isolation guarantees.
+1. Describe it in `FAMILY_META` in `app/catalog.py`.
+2. Add its entries in `_build()` in the same file.
+3. Write its handler in `app/handlers.py` and add it to `HANDLERS`.
+4. Add a working example exploit in `example_sequence()`.
+5. Place the feature somewhere natural in OrbitDesk (`app/product.py`), using
+   normal product wording.
+6. Run `pytest`. The tests will tell you if anything is missing.
 
 ---
 
 ## Ethical use
 
-VulnWeb-Lab is for education and authorized security testing on systems you own
-or are explicitly permitted to test. The vulnerabilities are deliberately
-real. Do not deploy this application on a public network, and do not use the
-techniques it teaches against systems without written authorization.
+Use VulnWeb-Lab only to learn, and to test tools on systems you own or have
+written permission to test. Never use what it teaches against anyone else's
+systems.
 
 ## License
 
-MIT — see [LICENSE](LICENSE).
+MIT. See [LICENSE](LICENSE).

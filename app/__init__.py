@@ -1,4 +1,14 @@
-"""Application factory for both interfaces."""
+"""Application factory.
+
+There are two modes:
+
+* **learning** (default): OrbitDesk plus the Academy at ``/lab``.
+* **exam**: OrbitDesk only. The Academy, the catalog and the progress API are
+  gone, and flags live in memory and change on every start.
+
+The old mode names still work: ``both`` and ``lab`` mean learning, ``site``
+means exam (it used to hide the Academy but still served the answer list).
+"""
 from __future__ import annotations
 
 from flask import Flask, jsonify, redirect, render_template, request
@@ -7,12 +17,23 @@ import config
 from . import flags, store
 from .catalog import CATALOG, counts
 
+#: Old mode names, kept so existing commands and scripts keep working.
+LEGACY_MODES = {"both": "learn", "lab": "learn", "learn": "learn", "site": "exam", "exam": "exam"}
 
-def create_app(mode: str = "both", exam: bool | None = None) -> Flask:
-    exam = bool(exam) or config.EXAM
+
+def resolve_mode(mode: str = "learn", exam: bool | None = None) -> str:
+    """``learn`` or ``exam`` from a mode name, the exam flag and RANGE_EXAM."""
+
+    if exam or config.EXAM:
+        return "exam"
+    return LEGACY_MODES.get(str(mode or "learn").lower(), "learn")
+
+
+def create_app(mode: str = "learn", exam: bool | None = None) -> Flask:
+    mode = resolve_mode(mode, exam)
+    exam = mode == "exam"
     if exam:
         config.begin_exam()
-        mode = "site"
 
     app = Flask(__name__, instance_relative_config=False)
     app.secret_key = config.SECRET
@@ -26,7 +47,7 @@ def create_app(mode: str = "both", exam: bool | None = None) -> Flask:
 
     app.register_blueprint(site_bp)
 
-    if mode != "site" and not exam:
+    if not exam:
         from .lab import bp as lab_bp
 
         app.register_blueprint(lab_bp)
@@ -41,8 +62,6 @@ def create_app(mode: str = "both", exam: bool | None = None) -> Flask:
     def landing():
         if exam:
             return redirect("/login")
-        if mode == "lab":
-            return redirect("/lab")
         return render_template(
             "landing.html",
             total=len(CATALOG),

@@ -148,3 +148,15 @@ def test_every_academy_lesson_loads(client):
 def test_landing_page_enters_the_site(client):
     body = client.get("/").get_data(as_text=True)
     assert 'href="/dashboard"' in body
+
+
+@pytest.mark.skipif(EXAM, reason="RANGE_EXAM forces exam mode for every name")
+@pytest.mark.parametrize("name, expected", [
+    ("both", "learn"), ("lab", "learn"), ("learn", "learn"), ("", "learn"),
+    ("site", "exam"), ("exam", "exam"),
+])
+def test_old_mode_names_map_to_the_two_modes(name, expected):
+    from app import resolve_mode
+
+    assert resolve_mode(name) == expected
+    assert resolve_mode(name, exam=True) == "exam"

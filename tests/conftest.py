@@ -9,7 +9,7 @@ EXAM = os.environ.get("RANGE_EXAM", "0") == "1"
 
 @pytest.fixture(scope="session")
 def app():
-    return create_app("site" if EXAM else "both", exam=EXAM)
+    return create_app(exam=EXAM)
 
 
 @pytest.fixture()
