@@ -944,12 +944,13 @@ def _build() -> list[Vuln]:
     # ------------------------------------------------------------------ LDAP (4)
     ldap = [
         ("Directory search", "/directory/search", "filter"),
-        ("LDAP authentication", "/auth/ldap", "filter"),
+        ("LDAP authentication", "/auth/ldap", "login"),
         ("Staff directory", "/staff/search", "filter"),
         ("Directory API", "/api/directory", "filter"),
     ]
     for i, (title, route, kind) in enumerate(ldap, 1):
-        out.append(_mk("ldap", i, title, route, "GET", "filter",
+        out.append(_mk("ldap", i, title, route, "POST" if kind == "login" else "GET",
+                       "username" if kind == "login" else "filter",
                        {"kind": kind}, difficulty="medium"))
 
     # ------------------------------------------------------------------- XXE (6)

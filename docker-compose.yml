@@ -4,6 +4,7 @@ services:
     ports:
       # Loopback only. Do not publish this on 0.0.0.0.
       - "127.0.0.1:8080:8080"
+      - "127.0.0.1:8025:8025"   # your mailbox
     environment:
       RANGE_SECRET: "vulnweb-lab-local-training-secret"
       RANGE_SAFE: "0"

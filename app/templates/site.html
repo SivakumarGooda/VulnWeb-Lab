@@ -9,12 +9,17 @@
 <body>
   <header class="topbar">
     <a class="brand" href="/dashboard"><span class="logo">O</span> OrbitDesk</a>
+    {% if user %}
     <nav>
       {% for href, label in nav %}<a href="{{ href }}">{{ label }}</a>
       {% endfor %}
     </nav>
     <form class="topsearch" method="get" action="/search"><input name="q" placeholder="Search OrbitDesk"></form>
-    <div class="account"><a href="/account">alice@orbitdesk.local</a></div>
+    <div class="account"><a href="/account">{{ user.email }}</a> · <a href="/logout?redirect=/login">Sign out</a></div>
+    {% else %}
+    <nav><a href="/help-center">Help</a><a href="/api-docs">API</a></nav>
+    <div class="account"><a href="/login">Sign in</a></div>
+    {% endif %}
   </header>
   <main class="wrap">
     {{ content }}

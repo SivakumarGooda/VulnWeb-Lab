@@ -37,6 +37,8 @@ def create_app(mode: str = "learn", exam: bool | None = None) -> Flask:
 
     app = Flask(__name__, instance_relative_config=False)
     app.secret_key = config.SECRET
+    # "session" is left free for the session-fixation exercise's own cookie.
+    app.config["SESSION_COOKIE_NAME"] = "orbit_session"
     app.config["RANGE_MODE"] = mode
     app.config["RANGE_EXAM"] = exam
 
@@ -52,11 +54,15 @@ def create_app(mode: str = "learn", exam: bool | None = None) -> Flask:
 
         app.register_blueprint(lab_bp)
 
+    from . import auth
+
+    app.before_request(auth.gate)
+
     @app.context_processor
     def _inject_mode():
         from .product import NAV
 
-        return {"exam": config.EXAM, "nav": NAV}
+        return {"exam": config.EXAM, "nav": NAV, "user": auth.current_user()}
 
     @app.get("/")
     def landing():

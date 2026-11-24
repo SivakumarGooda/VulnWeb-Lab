@@ -14,10 +14,14 @@ mode, ``--mode site`` starts exam mode.
 from __future__ import annotations
 
 import argparse
+import threading
+
+from werkzeug.serving import make_server
 
 import config
 from app import create_app, resolve_mode
 from app.catalog import counts
+from app.mail import create_mail_app
 
 
 def main() -> None:
@@ -30,6 +34,8 @@ def main() -> None:
                         help=f"address to listen on (default {config.HOST})")
     parser.add_argument("--port", type=int, default=config.PORT,
                         help=f"port to listen on (default {config.PORT})")
+    parser.add_argument("--mail-port", type=int, default=config.MAIL_PORT,
+                        help=f"port for your mailbox (default {config.MAIL_PORT})")
     # Old mode names, kept so existing commands keep working.
     parser.add_argument("--mode", choices=("both", "lab", "site"), default="both",
                         help=argparse.SUPPRESS)
@@ -37,6 +43,7 @@ def main() -> None:
 
     if args.mode == "site" and not args.exam:
         print("Note: --mode site is now exam mode (use --exam).")
+    config.MAIL_PORT = args.mail_port
     mode = resolve_mode(args.mode, args.exam)
     exam = mode == "exam"
     app = create_app(mode)
@@ -50,6 +57,8 @@ def main() -> None:
     else:
         print("  Mode       : learning - OrbitDesk, plus the Academy at /lab")
     print(f"  Open       : http://{args.host}:{args.port}")
+    print(f"  Mailbox    : http://{args.host}:{args.mail_port}  (mail for alice@orbitdesk.local and *@{config.INBOX_DOMAIN})")
+    print("  Sign in    : alice@orbitdesk.local / alice123")
     print(f"  Contents   : {total} vulnerabilities across {len(counts_by_family)} types")
     print(f"  Flags      : {'change on every start, kept in memory' if exam else 'stay the same between restarts'}")
     print(f"  Safe mode  : {'ON (command execution and file reads off)' if config.SAFE_MODE else 'off'}")
@@ -59,6 +68,8 @@ def main() -> None:
         print("  WARNING    : never expose this to the internet or a shared network.")
     print("=" * 72)
 
+    mailbox = make_server(args.host, args.mail_port, create_mail_app(), threaded=True)
+    threading.Thread(target=mailbox.serve_forever, daemon=True).start()
     app.run(host=args.host, port=args.port, debug=False, threaded=True)
 
 

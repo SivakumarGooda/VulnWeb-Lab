@@ -100,38 +100,31 @@ def upload(action: str, label: str, button: str = "Upload") -> str:
 # Pages
 # ---------------------------------------------------------------------------
 
-def login() -> str:
-    hint = "" if config.EXAM else (
-        '<p class="tiny">The sign-in endpoint above is intentionally vulnerable. The real '
-        "authentication exercises live under <code>/auth/*</code> and <code>/account/*</code>.</p>"
-    )
+def login(next_: str = "", error: str = "") -> str:
+    error_html = f'<p class="bad">{esc(error)}</p>' if error else ""
     return (
         '<section class="panel narrow"><h1>Sign in to OrbitDesk</h1>'
-        '<p class="muted">Demo workspace credentials: <code>alice@orbitdesk.local</code> / <code>alice123</code></p>'
-        + pform("/auth/login", [("email", "Email", "email", ""), ("password", "Password", "password", ""),
-                                ("next", "", "hidden", "/dashboard")], "Sign in")
-        + ul(
-            a("/account/forgot-password", "Forgot password?"),
-            a("/auth/magic-link", "Email me a sign-in link"),
-            a("/auth/otp", "I have a one-time code"),
-            a("/auth/2fa", "Two-step verification"),
-            a("/auth/login-legacy", "Classic sign-in page"),
-            a("/auth/demo/login", "Try the demo workspace"),
-            a("/auth/support/login", "Support partner portal"),
-            a("/auth/staff", "Staff sign-in"),
-        )
-        + gform("/auth/ldap", "filter", "Company directory sign-in (username)", "", "Continue")
-        + f"{hint}</section>"
+        f"{error_html}"
+        '<form class="probe" method="post" action="/auth/login">'
+        '<label>Email</label><input name="email" autocomplete="username">'
+        '<label>Password</label><input type="password" name="password" autocomplete="current-password">'
+        '<label class="remember"><input type="checkbox" name="remember" value="1"> Keep me signed in</label>'
+        f'<input type="hidden" name="next" value="{esc(next_)}">'
+        "<button>Sign in</button></form>"
+        '<p class="signin-links">' + a("/account/forgot-password", "Forgot password?")
+        + " · " + a("/auth/magic-link", "Email me a sign-in link")
+        + " · " + a("/auth/ldap", "Sign in with your company directory") + "</p>"
+        "</section>"
     )
 
 
-def dashboard(solved: int) -> str:
+def dashboard(solved: int, name: str = "Alice") -> str:
     third = (
         '<div class="stat"><b>98%</b><span>SLA met</span></div>' if config.EXAM
         else f'<div class="stat"><b>{solved}</b><span>Flags captured</span></div>'
     )
     return (
-        '<section class="hero"><div><p class="kicker">Support operations</p><h1>Good morning, Alice</h1>'
+        f'<section class="hero"><div><p class="kicker">Support operations</p><h1>Good morning, {esc(name)}</h1>'
         '<p class="muted">3 open tickets, 1 escalation, and 2 integrations need attention.</p></div>'
         '<div class="stat"><b>3</b><span>Open tickets</span></div>'
         f'<div class="stat"><b>1</b><span>Escalations</span></div>{third}</section>'
@@ -167,8 +160,9 @@ def tickets() -> str:
              gform("/tickets/reply-template", "template", "Saved reply", "Thanks for reaching out", "Preview")),
         card("Customer details",
              gform("/support/avatar", "avatar_url", "Requester photo URL", "", "Fetch"),
-             pform("/support/email", [("email", "Send this ticket to", "email", ""),
-                                      ("subject", "Subject", "text", "Ticket #1042")], "Email")),
+             pform("/support/email", [("email", "Reply-to address", "email", ""),
+                                      ("subject", "Subject", "text", "Escalate ticket #1042"),
+                                      ("message", "Why does this need escalating?", "textarea", "")], "Escalate")),
         card("More", ul(a("/support?query=printer", "Search the support center"),
                         a("/support/redirect?url=/help/search", "Open in help center"),
                         a("/support/xml", "Import tickets from another system"),
@@ -318,7 +312,8 @@ def team() -> str:
              gform("/staff/search", "filter", "Staff directory", "", "Look up")),
         card("Invite", gform("/invite", "email", "Invite by email", "", "Invite"),
              gform("/team/invite", "name", "Teammate name", "", "Continue"),
-             pform("/invite/email", [("email", "Email", "email", ""), ("subject", "Subject", "text", "Join OrbitDesk")], "Send invitation"),
+             pform("/invite/send", [("email", "Invite by email", "email", "")], "Send invitation"),
+             pform("/invite/email", [("email", "Your email", "email", ""), ("subject", "Request", "text", "Extra seat for a new hire")], "Ask IT for a seat"),
              pform("/invitations", [("content", "Personal message", "textarea", "")], "Save message"),
              ul(a("/invite/send?email=bob@orbitdesk.local", "Resend Bob's invitation"),
                 a("/invite/accept?next=/dashboard", "Preview the acceptance page"),
@@ -381,7 +376,11 @@ def help_center() -> str:
         card("Community", pform("/wiki", [("content", "Edit the team wiki", "textarea", "")], "Save page"),
              pform("/reviews", [("content", "Write a review", "textarea", "")], "Post review"),
              pform("/status/update", [("content", "Status update", "textarea", "")], "Publish")),
-        card("Contact us", pform("/contact", [("email", "Your email", "email", ""), ("subject", "Subject", "text", "")], "Send")),
+        card("Contact us", pform("/contact", [("email", "Your email", "email", ""), ("subject", "Subject", "text", ""),
+                                              ("message", "Message", "textarea", "")], "Send")),
+        card("Other sign-in options", ul(a("/auth/demo/login", "Try the demo workspace"),
+                                         a("/auth/support/login", "Partner portal"),
+                                         a("/auth/staff", "Staff sign-in"))),
     )
 
 
@@ -438,6 +437,7 @@ def robots(base: str) -> str:
         "Disallow: /logs/\n"
         "Disallow: /soap/\n"
         "Disallow: /internal/\n"
+        "Disallow: /auth/login-legacy\n"
         f"Sitemap: {base.rstrip('/')}/sitemap.xml\n"
     )
 

@@ -50,7 +50,33 @@ pip install -r requirements.txt
 python run.py
 ```
 
-Then open **http://127.0.0.1:8080** in your browser. Stop it with `Ctrl+C`.
+Then open **http://127.0.0.1:8080** in your browser and sign in as
+**`alice@orbitdesk.local` / `alice123`**. Stop it with `Ctrl+C`.
+
+### Your accounts and your mailbox
+
+OrbitDesk has real sign-in: most pages need you to be signed in, and the API
+answers `401` without a session or token.
+
+| Account | Password | What it is |
+|---|---|---|
+| `alice@orbitdesk.local` | `alice123` | **You.** Your own account. Her mail arrives in your mailbox. |
+| `bob@orbitdesk.local` | `bob123` | A colleague whose password you know, but his account has two-step verification and his mail goes to *his* inbox, not yours. |
+| `admin@orbitdesk.local` | unknown | The administrator. Getting in is up to you. |
+
+**Your mailbox** runs next to the site at **http://127.0.0.1:8025**, like a
+real mail catcher. Password resets, sign-in links, one-time codes and form
+copies sent to you land there:
+
+- It shows mail for `alice@orbitdesk.local` and for **any address
+  `@inbox.test`** (think of it as your own outside email domain).
+- It is also **your web server**: any request to it, and any link a victim
+  clicks that points at it (or at any `*.inbox.test` host), shows up under
+  **Requests**.
+- Other people's mail (admin, Bob) is never shown. Like real users, they click
+  the links in their mail, so if you can make their link point at your
+  server, you'll see it.
+- For tools: `GET /api/messages` and `GET /api/requests` return the same as JSON.
 
 ### All start options
 
@@ -59,6 +85,7 @@ Then open **http://127.0.0.1:8080** in your browser. Stop it with `Ctrl+C`.
 | `--exam` | Exam mode (see below). Without it you get learning mode | off |
 | `--host <ip>` | Address to listen on | `127.0.0.1` |
 | `--port <n>` | Port to listen on | `8080` |
+| `--mail-port <n>` | Port for your mailbox | `8025` |
 
 Examples:
 
@@ -87,7 +114,8 @@ python run.py --host 0.0.0.0 --port 8081
 ```
 
 Find the machine's IP with `ip -4 addr` (Linux) or `ipconfig` (Windows), then
-open `http://<that-ip>:8081` from the other machine.
+open `http://<that-ip>:8081` from the other machine. The mailbox listens on the
+same address, at port `8025`.
 
 > [!CAUTION]
 > Anyone who can reach that port can attack the machine running the app,
@@ -97,7 +125,7 @@ open `http://<that-ip>:8081` from the other machine.
 >
 > - Prefer a single IP over `0.0.0.0`, which also listens on Wi-Fi and VPNs.
 > - Allow only the machine that needs it, e.g.
->   `sudo ufw allow from 192.168.56.1 to any port 8081`.
+>   `sudo ufw allow from 192.168.56.1 to any port 8081,8025 proto tcp`.
 > - Add `RANGE_SAFE=1` to turn off command execution and file reads if you don't
 >   need those exercises.
 > - Stop the app when you're done.
@@ -110,13 +138,14 @@ open `http://<that-ip>:8081` from the other machine.
 docker compose up --build
 ```
 
-Open **http://127.0.0.1:8080**. The container runs as a non-root user and is
-reachable from your own machine only.
+Open **http://127.0.0.1:8080** (mailbox at **http://127.0.0.1:8025**). The
+container runs as a non-root user and is reachable from your own machine only.
 
 - **Exam mode:** in `docker-compose.yml`, remove `RANGE_SECRET` and set
   `RANGE_EXAM: "1"`.
-- **Another machine:** change the `ports:` line from `"127.0.0.1:8080:8080"` to
-  your network IP (e.g. `"192.168.56.10:8080:8080"`). The caution above applies.
+- **Another machine:** change both `ports:` lines from `127.0.0.1` to your
+  network IP (e.g. `"192.168.56.10:8080:8080"` and `"192.168.56.10:8025:8025"`).
+  The caution above applies.
 
 ---
 
@@ -154,12 +183,23 @@ hands over the other 247.
   changing IDs yourself.
 - `robots.txt` disallows `/admin/`. Tools that respect robots.txt will skip the
   admin area unless told otherwise.
+- The sign-in page only offers what a real one does: password, "Forgot
+  password?", an emailed sign-in link and company-directory sign-in. Other
+  sign-in portals have to be found.
+- Links and codes are never shown on the page; they arrive by email, so the
+  tool has to read its mailbox.
 
 **How to run a fair test**
 
 1. Run the app in a fresh container or VM, and the tool on a different machine.
-2. Give the tool **only the base URL**, never this repository, `/api/catalog`,
-   the Academy or `tools/exploit_all.py` (they contain the answers).
+2. Give the tool what a real authenticated test would get, and nothing more:
+   - the site URL, e.g. `http://192.168.56.10:8080`
+   - its account: `alice@orbitdesk.local` / `alice123`
+   - its mailbox: `http://192.168.56.10:8025` (mail for alice and `*@inbox.test`,
+     plus a log of requests to it)
+
+   Never give it this repository, `/api/catalog`, the Academy or
+   `tools/exploit_all.py` (they contain the answers).
 3. Delete any leftover `instance/` folder from earlier learning sessions first.
 4. Score by checking the flags the tool finds (see below).
 
@@ -227,6 +267,7 @@ every time.
 |---|---|
 | `RANGE_HOST` / `--host` | Address to listen on. Default `127.0.0.1` (this machine only). |
 | `RANGE_PORT` / `--port` | Port. Default `8080`. |
+| `RANGE_MAIL_PORT` / `--mail-port` | Mailbox port. Default `8025`. |
 | `RANGE_SAFE=1` | Turns off command execution, file reads and `file://` fetches. |
 | `RANGE_EXAM=1` / `--exam` | Exam mode. |
 | `RANGE_SECRET` | Fixed secret for stable flags in learning mode. |
@@ -245,9 +286,9 @@ Also built in:
 ### Run the tests
 
 ```bash
-pytest -q                                   # learning mode: 296 passed, 11 skipped
+pytest -q                                   # learning mode: 316 passed, 11 skipped
 RANGE_EXAM=1 pytest -q tests/test_catalog.py tests/test_exploits.py \
-  tests/test_exam.py tests/test_product.py  # exam mode: 292 passed, 8 skipped
+  tests/test_exam.py tests/test_product.py tests/test_auth.py   # exam mode: 312 passed, 8 skipped
 ```
 
 The tests prove every one of the 248 vulnerabilities can actually be exploited
@@ -272,6 +313,8 @@ VulnWeb-Lab/
     catalog.py          the 248 vulnerabilities and their lessons
     handlers.py         the vulnerable behaviour and example exploits
     product.py          OrbitDesk pages, navigation, robots.txt, sitemap
+    auth.py             accounts, sessions and the sign-in wall
+    mail.py             outgoing mail and your mailbox server
     site.py             OrbitDesk routes
     lab.py              the Academy and the catalog API
     store.py            database, flags and solves
@@ -283,6 +326,7 @@ VulnWeb-Lab/
     test_exploits.py    every entry is exploitable
     test_exam.py        exam mode hides the answers
     test_product.py     the site stays realistic
+    test_auth.py        sign-in, sessions and mail flows behave like a real app
     test_ui.py          Academy and API pages
   tools/
     exploit_all.py      replays every exploit against a running instance

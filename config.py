@@ -48,6 +48,14 @@ SECRET = secrets.token_hex(32) if EXAM else _load_secret()
 HOST = os.environ.get("RANGE_HOST", "127.0.0.1")
 PORT = int(os.environ.get("RANGE_PORT", "8080"))
 
+# The tester's mailbox: a second small server (like MailHog) that shows the mail
+# OrbitDesk sends to the tester, and logs requests made to it.
+MAIL_PORT = int(os.environ.get("RANGE_MAIL_PORT", "8025"))
+
+# The tester's own OrbitDesk account, and the outside mail domain they control.
+TESTER_EMAIL = "alice@orbitdesk.local"
+INBOX_DOMAIN = "inbox.test"
+
 # When RANGE_SAFE=1 the command-injection and local-file-read endpoints are
 # disabled. Handy when running outside a container on a machine you care about.
 SAFE_MODE = os.environ.get("RANGE_SAFE", "0") == "1"

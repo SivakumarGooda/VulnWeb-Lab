@@ -11,6 +11,8 @@ from collections import defaultdict
 
 from flask import Blueprint, jsonify, redirect, render_template, request, url_for
 
+import config
+
 from . import store
 from .catalog import BY_ID, CATALOG, counts, manifest
 from .handlers import example_sequence
@@ -124,7 +126,10 @@ def describe_sequence(vuln, sequence) -> list[str]:
             pairs = query.items() if isinstance(query, dict) else query
             encoded = "&".join(f"{key}={value}" for key, value in pairs)
             path = f"{path}?{encoded}"
-        parts = [f"curl -i -X {method} 'http://127.0.0.1:8080{path}'"]
+        port = config.MAIL_PORT if step.get("server") == "mail" else config.PORT
+        if step.get("server") == "mail":
+            lines.append("# check your mailbox")
+        parts = [f"curl -i -X {method} 'http://127.0.0.1:{port}{path}'"]
         for key, value in (step.get("headers") or {}).items():
             parts.append(f"-H '{key}: {value}'")
         data = step.get("data")
@@ -144,4 +149,6 @@ def describe_sequence(vuln, sequence) -> list[str]:
                 content_type = f";type={spec[2]}" if len(spec) > 2 and spec[2] else ""
                 parts.append(f"-F '{field}=@/path/to/local/{filename}{content_type}'")
         lines.append(" ".join(parts))
+        for name in step.get("capture") or {}:
+            lines.append(f"# copy the {name} from that response into {{{name}}} below")
     return lines

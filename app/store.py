@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import base64
 import sqlite3
+import threading
 from datetime import datetime, timezone
 from typing import Any, Iterable
 
@@ -18,6 +19,7 @@ from . import flags
 STATE: dict[str, Any] = {}
 SOLVES: set[str] = set()
 EXAM_DBS: dict[str, sqlite3.Connection] = {}
+_EXAM_LOCK = threading.Lock()
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS users (
@@ -136,13 +138,16 @@ def query_for(vuln, sql: str) -> list[sqlite3.Row]:
     """Run a vulnerable query against the challenge's own database in exam mode."""
     if not config.EXAM:
         return raw_query(sql)
-    con = EXAM_DBS.get(vuln.id)
-    if con is None:
-        con = sqlite3.connect(":memory:")
-        con.row_factory = sqlite3.Row
-        _seed(con, vuln_id=vuln.id)
-        EXAM_DBS[vuln.id] = con
-    return list(con.execute(sql))
+    # The server is threaded: share each in-memory database across threads,
+    # one query at a time.
+    with _EXAM_LOCK:
+        con = EXAM_DBS.get(vuln.id)
+        if con is None:
+            con = sqlite3.connect(":memory:", check_same_thread=False)
+            con.row_factory = sqlite3.Row
+            _seed(con, vuln_id=vuln.id)
+            EXAM_DBS[vuln.id] = con
+        return list(con.execute(sql))
 
 
 def verify_flag(flag: str) -> dict[str, Any] | None:

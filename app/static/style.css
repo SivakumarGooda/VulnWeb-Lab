@@ -201,3 +201,8 @@ pre, .terminal, .file, .json, .rendered {
   .topbar { flex-wrap: wrap; }
   .topbar .account { margin-left: 0; }
 }
+
+/* sign-in */
+.probe label.remember { display: flex; align-items: center; gap: 8px; text-transform: none; letter-spacing: 0; font-size: 14px; color: var(--muted); }
+.probe label.remember input { width: auto; margin: 0; }
+.signin-links { font-size: 14px; line-height: 1.9; }

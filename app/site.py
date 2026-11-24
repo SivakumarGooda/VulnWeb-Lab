@@ -11,7 +11,7 @@ from markupsafe import Markup
 from flask import Blueprint, Response, render_template, request
 
 import config
-from . import store
+from . import auth, store
 from .catalog import CATALOG
 from . import product
 from .handlers import make_view
@@ -33,12 +33,13 @@ def _render(title: str, inner: str, status: int = 200):
 
 @bp.get("/login")
 def login_page():
-    return _render("Sign in", product.login())
+    return _render("Sign in", product.login(next_=request.args.get("next", "")))
 
 
 @bp.get("/dashboard")
 def dashboard():
-    return _render("Dashboard", product.dashboard(len(store.solved())))
+    user = auth.current_user() or {"name": "Alice"}
+    return _render("Dashboard", product.dashboard(len(store.solved()), user["name"].split()[0]))
 
 
 _PAGES = {
